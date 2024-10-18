@@ -179,7 +179,13 @@ const AudioVisualizer = {
 const toHHMMSS = (seconds) => {
   return new Date(seconds * 1e3).toISOString().slice(11, 19);
 };
-const useRecorder = ({ afterStartRecording, afterStopRecording, afterPauseRecording, afterResumeRecording, getAsMp3 } = {}) => {
+const useRecorder = ({
+  afterStartRecording,
+  afterStopRecording,
+  afterPauseRecording,
+  afterResumeRecording,
+  getAsMp3
+} = {}) => {
   const isRecording = ref(false);
   const isPaused = ref(false);
   const mediaRecorder = ref();
@@ -212,7 +218,6 @@ const useRecorder = ({ afterStartRecording, afterStopRecording, afterPauseRecord
   };
   const encodedDataBuffer = [];
   const mic = ref();
-  let mp3EncoderNode = null;
   const activeStream = ref();
   const _recordingTime = ref(0);
   const recordingTime = computed(() => {
@@ -239,7 +244,9 @@ const useRecorder = ({ afterStartRecording, afterStopRecording, afterPauseRecord
     await ensureAudioContextInitialized();
     if (timerInterval.value !== null)
       return;
-    navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+    navigator.mediaDevices.getUserMedia({
+      audio: { sampleSize: 16, channelCount: 1, sampleRate: 16e3 }
+    }).then((stream) => {
       activeStream.value = stream;
       isRecording.value = true;
       const recorder = new MediaRecorder(stream);
@@ -248,19 +255,16 @@ const useRecorder = ({ afterStartRecording, afterStopRecording, afterPauseRecord
       _startTimer();
       recordingState.value = "recording";
       mic.value = audioContext.createMediaStreamSource(stream);
-      mp3EncoderNode = new AudioWorkletNode(audioContext, "mp3-encoder-processor");
-      mp3EncoderNode.port.onmessage = (event) => {
-        if (event.data.type === "encodedData") {
-          encodedDataBuffer.push(...event.data.data);
-        }
+      recorder.ondataavailable = (chunks) => {
+        encodedDataBuffer.push(chunks.data);
+        afterStopRecording(chunks.data);
       };
-      mic.value.connect(mp3EncoderNode);
       if (afterStartRecording)
         afterStartRecording();
       AudioContextUtil.startAnalyze(stream);
     }).catch((err) => console.log(err));
   };
-  const stopRecording = () => {
+  const stopRecording = async () => {
     var _a;
     (_a = mediaRecorder.value) == null ? void 0 : _a.stop();
     _stopTimer();
@@ -269,23 +273,9 @@ const useRecorder = ({ afterStartRecording, afterStopRecording, afterPauseRecord
     isPaused.value = false;
     recordingState.value = "inactive";
     AudioContextUtil.resetAnalyser();
-    if (encodedDataBuffer.length > 0) {
-      const blob = new Blob(encodedDataBuffer, { type: "audio/mp3" });
-      recordingBlob.value = blob;
-      if (afterStopRecording) {
-        afterStopRecording(blob);
-      }
-      if (getAsMp3) {
-        const eventData = { data: blob, url: URL.createObjectURL(blob) };
-        getAsMp3(eventData);
-      }
-    }
     if (audioContext) {
       if (mic.value) {
         mic.value.disconnect();
-      }
-      if (mp3EncoderNode) {
-        mp3EncoderNode.disconnect();
       }
       if (activeStream.value) {
         activeStream.value.getAudioTracks().forEach((track) => track.stop());
@@ -429,7 +419,7 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
       resumeRecording
     } = useRecorder({
       afterStartRecording: () => emits("afterStartRecording"),
-      afterStopRecording: (blob) => emits("afterStartRecording", blob),
+      afterStopRecording: (blob) => emits("afterStopRecording", blob),
       afterPauseRecording: () => emits("afterPauseRecording"),
       afterResumeRecording: () => emits("afterResumeRecording"),
       getAsMp3: (value) => emits("getAsMp3", value)
